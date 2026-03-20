@@ -1,0 +1,87 @@
+version: "3.9"
+
+services:
+  auth:
+    image: node:20-alpine
+    container_name: mediamtx-auth
+    working_dir: /app
+    volumes:
+      - /home/<user>/mediamtx_stack/auth:/app
+    command: node server.js
+    restart: unless-stopped
+    networks:
+      - traefik
+  
+  mediamtx:
+    image: bluenviron/mediamtx:latest-ffmpeg
+    container_name: mediamtx
+    restart: unless-stopped
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    environment:
+    - TWITCH_KEY=<key>
+    - KICK_KEY=<key>
+
+    volumes:
+      - /home/davson/mediamtx_stack/mediamtx.yml:/mediamtx.yml
+      #- /home/davson/mediamtx_stack/certs:/certs:ro
+      - /home/davson/mediamtx_stack/recordings:/recordings
+
+    ports:
+      - "1935:1935"        # RTMP (plain)
+      #- "1936:1936"        # RTMP (plain)
+      - "8554:8554"        # RTSP
+      - "8890:8890/udp"    # SRT
+      - "8189:8189/udp"    # WebRTC ICE
+
+    networks:
+      - mediamtx
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=mediamtx"
+
+      # =========================
+      # HLS + DASH
+      # =========================
+      - "traefik.http.routers.stream.rule=Host(`url.eu`)"
+      - "traefik.http.routers.stream.entrypoints=websecure"
+      - "traefik.http.routers.stream.tls.certresolver=le"
+      - "traefik.http.routers.stream.service=stream"
+      - "traefik.http.services.stream.loadbalancer.server.port=8888"
+
+      # =========================
+      # WebRTC signaling
+      # =========================
+      - "traefik.http.routers.webrtc.rule=Host(`url.eu`)"
+      - "traefik.http.routers.webrtc.entrypoints=websecure"
+      - "traefik.http.routers.webrtc.tls.certresolver=le"
+      - "traefik.http.routers.webrtc.service=webrtc"
+      - "traefik.http.services.webrtc.loadbalancer.server.port=8889"
+
+      # =========================
+      # MediaMTX API
+      # =========================
+      - "traefik.http.routers.mtxapi.rule=Host(`url.eu`)"
+      - "traefik.http.routers.mtxapi.entrypoints=websecure"
+      - "traefik.http.routers.mtxapi.tls.certresolver=le"
+      - "traefik.http.routers.mtxapi.service=mtxapi"
+      - "traefik.http.services.mtxapi.loadbalancer.server.port=9997"
+
+      # =========================
+      # RTMPS ingest (TLS)
+      # =========================
+      - "traefik.tcp.routers.rtmps.rule=HostSNI(`url.eu`)"
+      - "traefik.tcp.routers.rtmps.entrypoints=rtmps"
+      - "traefik.tcp.routers.rtmps.tls.certresolver=le"
+      - "traefik.tcp.routers.rtmps.service=rtmps-svc"
+      - "traefik.tcp.services.rtmps-svc.loadbalancer.server.port=1935"
+      
+networks:
+  traefik:
+    external: true
